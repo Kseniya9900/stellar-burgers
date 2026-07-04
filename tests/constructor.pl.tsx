@@ -1,7 +1,6 @@
 import { expect, test, Page } from '@playwright/test';
-import { ingredients, ingredientsResponse } from './fixtures/ingredients';
+import { ingredients } from './fixtures/ingredients';
 
-const API = '**/api';
 const ORDER_NUMBER = 12345;
 
 const bun = ingredients[0];
@@ -13,9 +12,19 @@ async function mockIngredients(page: Page) {
     url: '**/api/ingredients',
     update: false
   });
+}
 
-  await page.route('**/api/ingredients', async (route) => {
-    await route.fulfill({ json: ingredientsResponse });
+async function mockUser(page: Page) {
+  await page.routeFromHAR('tests/hars/user.har', {
+    url: '**/api/auth/user',
+    update: false
+  });
+}
+
+async function mockOrder(page: Page) {
+  await page.routeFromHAR('tests/hars/order.har', {
+    url: '**/api/orders',
+    update: false
   });
 }
 
@@ -91,41 +100,8 @@ test.describe('страница конструктора бургера', () => 
     });
 
     await mockIngredients(page);
-
-    await page.route(`${API}/auth/user`, async (route) => {
-      await route.fulfill({
-        json: {
-          success: true,
-          user: { email: 'test@example.com', name: 'Test User' }
-        }
-      });
-    });
-
-    await page.route(`${API}/orders`, async (route) => {
-      expect(route.request().method()).toBe('POST');
-
-      await route.fulfill({
-        json: {
-          success: true,
-          name: 'Краторный био-бургер',
-          order: {
-            _id: 'order-id',
-            status: 'done',
-            name: 'Краторный био-бургер',
-            owner: {
-              name: 'Test User',
-              email: 'test@example.com',
-              createdAt: '2026-01-01T00:00:00.000Z',
-              updatedAt: '2026-01-01T00:00:00.000Z'
-            },
-            createdAt: '2026-01-01T00:00:00.000Z',
-            updatedAt: '2026-01-01T00:00:00.000Z',
-            number: ORDER_NUMBER,
-            price: 2934
-          }
-        }
-      });
-    });
+    await mockUser(page);
+    await mockOrder(page);
 
     await page.goto('/');
     await expect(page.getByText(bun.name).first()).toBeVisible();
@@ -142,5 +118,8 @@ test.describe('страница конструктора бургера', () => 
 
     await page.getByTestId('modal-close').click();
     await expect(page.getByText(String(ORDER_NUMBER))).not.toBeVisible();
+
+    await context.clearCookies();
+    await page.evaluate(() => window.localStorage.clear());
   });
 });
