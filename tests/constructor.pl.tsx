@@ -1,0 +1,125 @@
+import { expect, test, Page } from '@playwright/test';
+import { ingredients } from './fixtures/ingredients';
+
+const ORDER_NUMBER = 12345;
+
+const bun = ingredients[0];
+const main = ingredients[1];
+const sauce = ingredients[2];
+
+async function mockIngredients(page: Page) {
+  await page.routeFromHAR('tests/hars/ingredients.har', {
+    url: '**/api/ingredients',
+    update: false
+  });
+}
+
+async function mockUser(page: Page) {
+  await page.routeFromHAR('tests/hars/user.har', {
+    url: '**/api/auth/user',
+    update: false
+  });
+}
+
+async function mockOrder(page: Page) {
+  await page.routeFromHAR('tests/hars/order.har', {
+    url: '**/api/orders',
+    update: false
+  });
+}
+
+async function openConstructor(page: Page) {
+  await mockIngredients(page);
+  await page.goto('/');
+  await expect(page.getByText('Соберите бургер')).toBeVisible();
+  await expect(page.getByText(bun.name).first()).toBeVisible();
+}
+
+async function addIngredient(page: Page, ingredientName: string) {
+  await page
+    .locator('li', { hasText: ingredientName })
+    .getByRole('button', { name: 'Добавить' })
+    .click();
+}
+
+test.describe('страница конструктора бургера', () => {
+  test('добавляет булку и начинку в конструктор', async ({ page }) => {
+    await openConstructor(page);
+
+    await addIngredient(page, bun.name);
+    await addIngredient(page, main.name);
+
+    await expect(page.getByText(`${bun.name} (верх)`)).toBeVisible();
+    await expect(page.getByText(`${bun.name} (низ)`)).toBeVisible();
+    await expect(page.getByText(main.name).last()).toBeVisible();
+  });
+
+  test('открывает модальное окно с данными выбранного ингредиента и закрывает его по крестику', async ({
+    page
+  }) => {
+    await openConstructor(page);
+
+    await page.getByText(bun.name).first().click();
+
+    await expect(page.getByText('Детали ингредиента')).toBeVisible();
+    await expect(page.getByText(bun.name).last()).toBeVisible();
+    await expect(page.getByText('Калории, ккал')).toBeVisible();
+
+    await page.getByTestId('modal-close').click();
+    await expect(page.getByText('Детали ингредиента')).not.toBeVisible();
+  });
+
+  test('закрывает модальное окно ингредиента по оверлею', async ({ page }) => {
+    await openConstructor(page);
+
+    await page.getByText(sauce.name).first().click();
+    await expect(page.getByText('Детали ингредиента')).toBeVisible();
+    await expect(page.getByText(sauce.name).last()).toBeVisible();
+
+    await page
+      .getByTestId('modal-overlay')
+      .click({ position: { x: 10, y: 10 } });
+
+    await expect(page.getByText('Детали ингредиента')).not.toBeVisible();
+  });
+
+  test('создаёт заказ, показывает номер, очищает конструктор и закрывает модалку', async ({
+    page,
+    context
+  }) => {
+    await context.addCookies([
+      {
+        name: 'accessToken',
+        value: 'Bearer test-access-token',
+        url: 'http://localhost:4000'
+      }
+    ]);
+
+    await page.addInitScript(() => {
+      window.localStorage.setItem('refreshToken', 'test-refresh-token');
+    });
+
+    await mockIngredients(page);
+    await mockUser(page);
+    await mockOrder(page);
+
+    await page.goto('/');
+    await expect(page.getByText(bun.name).first()).toBeVisible();
+
+    await addIngredient(page, bun.name);
+    await addIngredient(page, main.name);
+
+    await page.getByRole('button', { name: 'Оформить заказ' }).click();
+
+    await expect(page.getByText(String(ORDER_NUMBER))).toBeVisible();
+    await expect(page.getByText('идентификатор заказа')).toBeVisible();
+    await expect(page.getByText('Выберите булки').first()).toBeVisible();
+    await expect(page.getByText('Выберите начинку')).toBeVisible();
+
+    await page.getByTestId('modal-close').click();
+    await expect(page.getByText(String(ORDER_NUMBER))).not.toBeVisible();
+
+    await context.clearCookies();
+    await page.evaluate(() => window.localStorage.clear());
+  });
+});
